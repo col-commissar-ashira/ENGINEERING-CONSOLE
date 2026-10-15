@@ -1,0 +1,150 @@
+name: Build release downloads
+# HOW TO USE: on GitHub, Releases > "Draft a new release" > create the tag (for example v3.0.0, it must equal "v" + the
+# version in engineering_console/__init__.py) > "Publish release". This workflow then builds the Linux AppImage, the .deb and
+# the macOS DMGs and attaches them, plus SHA256SUMS.txt, to that release. It takes roughly 10-20 minutes.
+# Manual run (Actions tab > Run workflow): builds everything as a test and keeps the files as downloadable workflow
+# artifacts. It does not touch any release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  tests:
+    name: Tests and version check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Tag must match the project version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            python3 packaging/check_version.py "${{ github.event.release.tag_name }}"
+          else
+            python3 packaging/check_version.py
+          fi
+      - run: pip install -r requirements.txt
+      - name: Run all tests
+        run: for t in tests/test_*.py; do echo "== $t"; python3 "$t" || exit 1; done
+
+  linux:
+    name: Linux (.deb + AppImage)
+    needs: tests
+    runs-on: ubuntu-22.04          # oldest glibc we build on = widest compatibility for the AppImage
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
+      - name: Build .deb
+        run: bash packaging/build_deb.sh
+      - name: Build AppImage
+        run: bash packaging/linux/build_appimage.sh
+      - name: Check .deb contents
+        run: |
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb | grep -E "usr/bin/engineering-console|\.desktop|\.svg|LICENSE"
+      - name: Smoke-test AppImage (system libxcb-cursor removed first, to prove the bundled copy works)
+        run: |
+          A=$(ls dist/*.AppImage)
+          sudo apt-get remove -y libxcb-cursor0
+          "$A" --appimage-extract-and-run --version
+          "$A" --appimage-extract-and-run --sensors | head -20
+          set +e
+          xvfb-run -a timeout 10 "$A" --appimage-extract-and-run
+          rc=$?
+          echo "exit code $rc (124 = still running after 10 s = started fine)"
+          [ "$rc" = 124 ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: tests
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    continue-on-error: ${{ matrix.optional }}     # a problem with the Intel runner must not block the other downloads
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14,         arch: arm64,  optional: false }   # Apple silicon
+          - { runner: macos-15-intel,   arch: x86_64, optional: true  }   # Intel Macs (label unverified, see README)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Build app and DMG
+        run: bash packaging/macos/build_app.sh
+      - name: Smoke-test the app bundle
+        run: |
+          BIN="dist/Engineering Console.app/Contents/MacOS/Engineering Console"
+          "$BIN" --version
+          QT_QPA_PLATFORM=offscreen "$BIN" &
+          PID=$!; sleep 10
+          kill -0 $PID && echo "still running after 10 s: started fine" && kill $PID
+      - name: Mount the DMG and check it
+        run: |
+          hdiutil attach dist/*.dmg -mountpoint /tmp/ecdmg -nobrowse
+          ls -la /tmp/ecdmg; test -d "/tmp/ecdmg/Engineering Console.app"
+          hdiutil detach /tmp/ecdmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  attach:
+    name: Attach downloads to the release
+    if: github.event_name == 'release' && needs.linux.result == 'success'
+    needs: [linux, macos]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write                 # only this job may modify the release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: assets, merge-multiple: true }
+      - name: Prepare files and checksums
+        run: |
+          cp packaging/linux/install-appimage.sh assets/engineering-console-install-appimage.sh
+          cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Make sure the important downloads exist
+        run: |
+          VER=$(python3 packaging/check_version.py)
+          fail=0
+          for f in "engineering-console-$VER-linux-x86_64.AppImage" "engineering-console_${VER}_all.deb" "engineering-console-$VER-macos-arm64.dmg"; do
+            [ -f "assets/$f" ] || { echo "::error::missing $f"; fail=1; }
+          done
+          [ -f "assets/engineering-console-$VER-macos-x86_64.dmg" ] || echo "::warning::Intel Mac DMG was not built - the release will have no Intel download"
+          exit $fail
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" assets/* --clobber --repo "${{ github.repository }}"
+          # Fill in the "which file do I download" text only if the release has no description yet
+          if [ -z "$(gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body)" ]; then
+            gh release edit "$TAG" --notes-file packaging/RELEASE_NOTES.md --repo "${{ github.repository }}"
+          fi
