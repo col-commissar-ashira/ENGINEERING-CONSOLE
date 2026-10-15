@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.engineeringconsole.EngineeringConsole</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Engineering Console</name>
+  <summary>Spaceship-style hardware monitoring console</summary>
+  <developer_name>Ashira Resevic</developer_name>
+  <update_contact>ashiraresevic@proton.me</update_contact>
+  <description>
+    <p>An instrument panel with large analog and digital gauges for CPU, RAM, any number of NVIDIA, AMD and Intel
+    GPUs, disks, network, fans, temperatures, power and audio levels, for Linux, Windows and macOS.</p>
+    <p>It shows N/A with the reason for any sensor your hardware or operating system does not expose, and never
+    invents readings. Includes profiles, color themes, drag-to-reorder gauges, a Red Alert for dangerous system load,
+    and an internet speed test with continuous testing and data limits.</p>
+  </description>
+  <launchable type="desktop-id">engineering-console.desktop</launchable>
+  <categories><category>System</category><category>Monitor</category></categories>
+  <provides><binary>engineering-console</binary></provides>
+  <content_rating type="oars-1.1"/>
+  <releases><release version="3.0.0" date="2026-10-11"/></releases>
+</component>

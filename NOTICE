@@ -1,0 +1,9 @@
+Engineering Console
+Copyright (c) 2026 Ashira Resevic
+
+This product is licensed under the MIT License (see the LICENSE file).
+
+This notice covers the code and documentation written for this project (the engineering_console/ package, tests,
+packaging scripts, icon and documentation). It does not cover third-party software that the application uses, that
+is bundled into the downloadable AppImage / macOS app, or that may be installed alongside it; those components keep
+their own licenses. See THIRD_PARTY_NOTICES.md.

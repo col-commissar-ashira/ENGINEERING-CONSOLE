@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Engineering Console
+GenericName=Hardware Monitor
+Comment=Spaceship-style instrument panel for CPU, GPUs, memory, disk, network and sensors
+Exec=engineering-console
+Icon=engineering-console
+Terminal=false
+Categories=System;Monitor;
+Keywords=monitor;gpu;cpu;temperature;sensors;nvidia;amd;intel;dashboard;
+StartupWMClass=engineering-console

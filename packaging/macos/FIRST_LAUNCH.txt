@@ -1,0 +1,15 @@
+ENGINEERING CONSOLE - first launch on macOS
+
+1. Drag "Engineering Console" onto the Applications folder.
+2. Open it from Applications. macOS will say it cannot verify the app. That is expected: this app is not signed
+   with an Apple Developer ID and is not notarized by Apple (that needs a paid Apple developer account).
+3. Allow it once:
+   - macOS 15 (Sequoia) and later: click "Done", open System Settings > Privacy & Security, scroll down to the
+     message about "Engineering Console" and click "Open Anyway", then confirm.
+   - macOS 14 and earlier: right-click (or Control-click) the app, choose Open, then Open again.
+   - Terminal alternative (any version):  xattr -dr com.apple.quarantine "/Applications/Engineering Console.app"
+4. It only asks once. Later launches are normal.
+
+Only do this if you downloaded the app from the project's official GitHub Releases page.
+Source code (MIT License): see the project page. Third-party licenses are inside the app: right-click it,
+Show Package Contents > Contents > Resources.
