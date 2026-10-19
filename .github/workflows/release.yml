@@ -1,9 +1,4 @@
 name: Build release downloads
-# HOW TO USE: on GitHub, Releases > "Draft a new release" > create the tag (for example v3.0.0, it must equal "v" + the
-# version in engineering_console/__init__.py) > "Publish release". This workflow then builds the Linux AppImage, the .deb and
-# the macOS DMGs and attaches them, plus SHA256SUMS.txt, to that release. It takes roughly 10-20 minutes.
-# Manual run (Actions tab > Run workflow): builds everything as a test and keeps the files as downloadable workflow
-# artifacts. It does not touch any release.
 on:
   release:
     types: [published]
@@ -36,13 +31,15 @@ jobs:
             python3 packaging/check_version.py
           fi
       - run: pip install -r requirements.txt
+      - name: Restore executable bits (web uploads lose them)
+        run: chmod +x install.sh uninstall.sh run.sh run_macos.command packaging/build_deb.sh
       - name: Run all tests
         run: for t in tests/test_*.py; do echo "== $t"; python3 "$t" || exit 1; done
 
   linux:
     name: Linux (.deb + AppImage)
     needs: tests
-    runs-on: ubuntu-22.04          # oldest glibc we build on = widest compatibility for the AppImage
+    runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -82,13 +79,13 @@ jobs:
     needs: tests
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
-    continue-on-error: ${{ matrix.optional }}     # a problem with the Intel runner must not block the other downloads
+    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14,         arch: arm64,  optional: false }   # Apple silicon
-          - { runner: macos-15-intel,   arch: x86_64, optional: true  }   # Intel Macs (label unverified, see README)
+          - { runner: macos-14,         arch: arm64,  optional: false }
+          - { runner: macos-15-intel,   arch: x86_64, optional: true  }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -120,7 +117,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
-      contents: write                 # only this job may modify the release
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -144,7 +141,6 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "$TAG" assets/* --clobber --repo "${{ github.repository }}"
-          # Fill in the "which file do I download" text only if the release has no description yet
           if [ -z "$(gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body)" ]; then
             gh release edit "$TAG" --notes-file packaging/RELEASE_NOTES.md --repo "${{ github.repository }}"
           fi
