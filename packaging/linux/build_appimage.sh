@@ -26,7 +26,11 @@ cp -r "$B/pyi/engineering-console" "$APPDIR/usr/lib/engineering-console"
 
 # Qt 6.5+ needs libxcb-cursor to open a window under X11; many distributions do not install it, so ship it.
 CUR=$(ldconfig -p | awk '/libxcb-cursor\.so\.0 /{print $NF; exit}')
-if [ -n "$CUR" ]; then cp -L "$CUR" "$APPDIR/usr/lib/engineering-console/"; else
+if [ -n "$CUR" ]; then
+  for d in "$APPDIR/usr/lib/engineering-console" "$APPDIR/usr/lib/engineering-console/_internal"; do
+    [ -d "$d" ] && cp -L "$CUR" "$d/" || true
+  done
+else
   echo "!! libxcb-cursor.so.0 not found on the build machine (apt install libxcb-cursor0). Refusing to build an AppImage that may not open a window." >&2; exit 1; fi
 
 cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$APPDIR/usr/share/doc/engineering-console/"
