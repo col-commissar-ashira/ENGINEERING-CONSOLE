@@ -16,7 +16,7 @@ pip install --quiet -r requirements.txt pyinstaller
 # App icon (Finder / Dock): render the SVG to .icns. If this fails the app is still built, just with the default icon.
 mkdir -p build/macos
 ICON_ARGS=()
-if python packaging/macos/make_icns.py engineering_console/icon.svg build/macos/icon.icns; then ICON_ARGS=(--icon build/macos/icon.icns); else echo "!! icon creation failed - building without it"; fi
+if python packaging/macos/make_icns.py engineering_console/icon.svg build/macos/icon.icns; then ICON_ARGS=(--icon "$PWD/build/macos/icon.icns"); else echo "!! icon creation failed - building without it"; fi
 pyinstaller --noconfirm --clean --windowed --name "$NAME" --osx-bundle-identifier org.engineeringconsole.EngineeringConsole \
   --distpath dist --workpath build/macos/work --specpath build/macos \
   ${ICON_ARGS[@]+"${ICON_ARGS[@]}"} --add-data "$PWD/engineering_console/icon.svg:engineering_console" --hidden-import PySide6.QtMultimedia main.py
