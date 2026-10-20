@@ -49,7 +49,7 @@ cat > "$APPDIR/AppRun" <<'RUN'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
 APP="$HERE/usr/lib/engineering-console"
-export LD_LIBRARY_PATH="$APP${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$APP/_internal:$APP${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$APP/engineering-console" "$@"
 RUN
 chmod 755 "$APPDIR/AppRun"
