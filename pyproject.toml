@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engineering-console"
-version = "3.0.0"
+version = "3.0.1"
 description = "Spaceship-style hardware monitoring console for Linux, Windows and macOS"
 readme = "README.md"
 requires-python = ">=3.9"
