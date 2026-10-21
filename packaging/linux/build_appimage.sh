@@ -24,15 +24,23 @@ APPDIR="$B/EngineeringConsole.AppDir"
 mkdir -p "$APPDIR/usr/lib" "$APPDIR/usr/share/doc/engineering-console/licenses"
 cp -r "$B/pyi/engineering-console" "$APPDIR/usr/lib/engineering-console"
 
-# Qt's X11 plugin needs these small xcb libraries; many distributions do not install them all, so ship them.
-for lib in libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 libxcb-render-util.so.0 libxcb-xkb.so.1 libxcb-xinerama.so.0 libxkbcommon-x11.so.0; do
-  SRC=$(ldconfig -p | awk -v l="$lib" '$1==l {print $NF; exit}')
+# PyInstaller 6+ puts libraries in _internal/; older versions put them next to the executable.
+APP="$APPDIR/usr/lib/engineering-console"
+LIBDIR="$APP"; [ -d "$APP/_internal" ] && LIBDIR="$APP/_internal"
+
+# Qt's X11 plugin (libqxcb.so) links against all of these. Many distributions lack some of them,
+# so ship every one. The release workflow installs the matching apt packages on the build machine.
+XCB_LIBS="libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 libxcb-randr.so.0
+  libxcb-render.so.0 libxcb-render-util.so.0 libxcb-shape.so.0 libxcb-shm.so.0 libxcb-sync.so.1
+  libxcb-xfixes.so.0 libxcb-xinerama.so.0 libxcb-xinput.so.0 libxcb-xkb.so.1 libxcb-util.so.1
+  libxcb-glx.so.0 libxkbcommon-x11.so.0"
+for lib in $XCB_LIBS; do
+  SRC=$(ldconfig -p | awk -v l="$lib" '$1==l && /x86-64/ {print $NF; exit}')
   if [ -z "$SRC" ]; then
-    echo "!! $lib not found on the build machine. Refusing to build an AppImage that may not open a window." >&2; exit 1
+    echo "!! $lib not found on the build machine (install the matching apt package). Refusing to build an AppImage that may not open a window." >&2
+    exit 1
   fi
-  for d in "$APPDIR/usr/lib/engineering-console" "$APPDIR/usr/lib/engineering-console/_internal"; do
-    [ -d "$d" ] && cp -L "$SRC" "$d/" || true
-  done
+  cp -L "$SRC" "$LIBDIR/"
 done
 
 cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$APPDIR/usr/share/doc/engineering-console/"
