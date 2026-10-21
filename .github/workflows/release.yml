@@ -46,7 +46,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
+        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xkb1 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
       - name: Build .deb
         run: bash packaging/build_deb.sh
       - name: Build AppImage
@@ -74,8 +74,8 @@ jobs:
           A=$(ls dist/*.AppImage)
           rm -rf diag && mkdir diag && cd diag
           "../$A" --appimage-extract >/dev/null
-          echo "--- libxcb-cursor copies in the bundle:"
-          find squashfs-root -name 'libxcb-cursor*'
+          echo "--- libxcb copies in the bundle:"
+          find squashfs-root -name 'libxcb*'
           Q=$(find squashfs-root -name libqxcb.so | head -1)
           echo "--- plugin: $Q"
           I=$(find squashfs-root -maxdepth 4 -type d -name _internal | head -1)
