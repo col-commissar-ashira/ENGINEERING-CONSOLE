@@ -1,163 +1,63 @@
-name: Build release downloads
-on:
-  release:
-    types: [published]
-  workflow_dispatch:
+#!/usr/bin/env bash
+# Build engineering-console-<version>-linux-x86_64.AppImage  (one file, runs on most x86_64 Linux distributions).
+# Needs: Linux x86_64, Python 3.9+ with venv, internet access (PySide6, PyInstaller, appimagetool), libxcb-cursor0.
+# For the widest compatibility build on an OLD distribution (the release workflow uses Ubuntu 22.04): an AppImage runs
+# on systems with the same or a newer glibc than the one it was built on.
+#   ./packaging/linux/build_appimage.sh        ->  dist/engineering-console-<version>-linux-x86_64.AppImage
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+[ "$(uname -m)" = x86_64 ] || { echo "This script builds the x86_64 AppImage; this machine is $(uname -m)." >&2; exit 1; }
+VER=$(python3 -c 'import re;print(re.search(r"__version__ = \"([^\"]+)\"", open("engineering_console/__init__.py").read()).group(1))')
+OUT="dist/engineering-console-${VER}-linux-x86_64.AppImage"
+B=build/appimage; rm -rf "$B"; mkdir -p "$B" dist
 
-permissions:
-  contents: read
+python3 -m venv "$B/venv"
+"$B/venv/bin/pip" install --quiet --upgrade pip
+"$B/venv/bin/pip" install --quiet -r requirements.txt pyinstaller
 
-concurrency:
-  group: build-${{ github.event.release.tag_name || github.ref }}
-  cancel-in-progress: false
+# One-folder bundle on purpose: Qt stays as separate, replaceable shared libraries (LGPL-3.0).
+"$B/venv/bin/pyinstaller" --noconfirm --clean --windowed --name engineering-console \
+  --distpath "$B/pyi" --workpath "$B/work" --specpath "$B" \
+  --add-data "$PWD/engineering_console/icon.svg:engineering_console" main.py
 
-env:
-  PYTHON_VERSION: "3.12"
+APPDIR="$B/EngineeringConsole.AppDir"
+mkdir -p "$APPDIR/usr/lib" "$APPDIR/usr/share/doc/engineering-console/licenses"
+cp -r "$B/pyi/engineering-console" "$APPDIR/usr/lib/engineering-console"
 
-jobs:
-  tests:
-    name: Tests and version check
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "${{ env.PYTHON_VERSION }}" }
-      - name: Tag must match the project version
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            python3 packaging/check_version.py "${{ github.event.release.tag_name }}"
-          else
-            python3 packaging/check_version.py
-          fi
-      - run: pip install -r requirements.txt
-      - name: Restore executable bits (web uploads lose them)
-        run: chmod +x install.sh uninstall.sh run.sh run_macos.command packaging/build_deb.sh
-      - name: Run all tests
-        run: for t in tests/test_*.py; do echo "== $t"; python3 "$t" || exit 1; done
+# Qt 6.5+ needs libxcb-cursor to open a window under X11; many distributions do not install it, so ship it.
+CUR=$(ldconfig -p | awk '/libxcb-cursor\.so\.0 /{print $NF; exit}')
+if [ -n "$CUR" ]; then
+  for d in "$APPDIR/usr/lib/engineering-console" "$APPDIR/usr/lib/engineering-console/_internal"; do
+    [ -d "$d" ] && cp -L "$CUR" "$d/" || true
+  done
+else
+  echo "!! libxcb-cursor.so.0 not found on the build machine (apt install libxcb-cursor0). Refusing to build an AppImage that may not open a window." >&2; exit 1; fi
 
-  linux:
-    name: Linux (.deb + AppImage)
-    needs: tests
-    runs-on: ubuntu-22.04
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "${{ env.PYTHON_VERSION }}" }
-      - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
-      - name: Build .deb
-        run: bash packaging/build_deb.sh
-      - name: Build AppImage
-        run: bash packaging/linux/build_appimage.sh
-      - name: Check .deb contents
-        run: |
-          dpkg-deb --info dist/*.deb
-          dpkg-deb --contents dist/*.deb | grep -E "usr/bin/engineering-console|\.desktop|\.svg|LICENSE"
-      - name: Smoke-test AppImage (system libxcb-cursor removed first, to prove the bundled copy works)
-        run: |
-          A=$(ls dist/*.AppImage)
-          sudo apt-get remove -y libxcb-cursor0
-          "$A" --appimage-extract-and-run --version
-          "$A" --appimage-extract-and-run --sensors | head -20
-          set +e
-          QT_DEBUG_PLUGINS=1 xvfb-run -a timeout 10 "$A" --appimage-extract-and-run > qt.log 2>&1
-          rc=$?
-          echo "--- Qt plugin messages:"
-          grep -iE "cannot load|not found|cannot open|libxcb|libxkb" qt.log | head -30
-          echo "exit code $rc (124 = still running after 10 s = started fine)"
-          [ "$rc" = 124 ]
-      - name: Diagnose missing libraries
-        if: failure()
-        run: |
-          A=$(ls dist/*.AppImage)
-          rm -rf diag && mkdir diag && cd diag
-          "../$A" --appimage-extract >/dev/null
-          echo "--- libxcb-cursor copies in the bundle:"
-          find squashfs-root -name 'libxcb-cursor*'
-          Q=$(find squashfs-root -name libqxcb.so | head -1)
-          echo "--- plugin: $Q"
-          I=$(find squashfs-root -maxdepth 4 -type d -name _internal | head -1)
-          echo "--- bundle lib folder: $I"
-          echo "--- libraries the plugin cannot find (with the bundle's folder on the path):"
-          LD_LIBRARY_PATH="$PWD/$I" ldd "$Q" | grep -i "not found" || echo "none"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: linux
-          path: |
-            dist/*.AppImage
-            dist/*.deb
-          if-no-files-found: error
+cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$APPDIR/usr/share/doc/engineering-console/"
+cp licenses/third-party/* "$APPDIR/usr/share/doc/engineering-console/licenses/"
+"$B/venv/bin/python" packaging/collect_licenses.py "$APPDIR/usr/share/doc/engineering-console/licenses"
 
-  macos:
-    name: macOS ${{ matrix.arch }}
-    needs: tests
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
-    continue-on-error: ${{ matrix.optional }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: macos-14,         arch: arm64,  optional: false }
-          - { runner: macos-15-intel,   arch: x86_64, optional: true  }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "${{ env.PYTHON_VERSION }}" }
-      - name: Build app and DMG
-        run: bash packaging/macos/build_app.sh
-      - name: Smoke-test the app bundle
-        run: |
-          BIN="dist/Engineering Console.app/Contents/MacOS/Engineering Console"
-          "$BIN" --version
-          QT_QPA_PLATFORM=offscreen "$BIN" &
-          PID=$!; sleep 10
-          kill -0 $PID && echo "still running after 10 s: started fine" && kill $PID
-      - name: Mount the DMG and check it
-        run: |
-          hdiutil attach dist/*.dmg -mountpoint /tmp/ecdmg -nobrowse
-          ls -la /tmp/ecdmg; test -d "/tmp/ecdmg/Engineering Console.app"
-          hdiutil detach /tmp/ecdmg
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: dist/*.dmg
-          if-no-files-found: error
+install -Dm644 engineering_console/icon.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/engineering-console.svg"
+"$B/venv/bin/python" packaging/linux/make_png.py engineering_console/icon.svg "$APPDIR/engineering-console.png" 256
+cp "$APPDIR/engineering-console.png" "$APPDIR/.DirIcon"
+install -Dm644 packaging/org.engineeringconsole.EngineeringConsole.metainfo.xml \
+  "$APPDIR/usr/share/metainfo/org.engineeringconsole.EngineeringConsole.appdata.xml"
+cp packaging/engineering-console.desktop "$APPDIR/engineering-console.desktop"
+sed -i 's/^Exec=.*/Exec=engineering-console/; s/^Icon=.*/Icon=engineering-console/' "$APPDIR/engineering-console.desktop"
 
-  attach:
-    name: Attach downloads to the release
-    if: github.event_name == 'release' && needs.linux.result == 'success'
-    needs: [linux, macos]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { path: assets, merge-multiple: true }
-      - name: Prepare files and checksums
-        run: |
-          cp packaging/linux/install-appimage.sh assets/engineering-console-install-appimage.sh
-          cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
-      - name: Make sure the important downloads exist
-        run: |
-          VER=$(python3 packaging/check_version.py)
-          fail=0
-          for f in "engineering-console-$VER-linux-x86_64.AppImage" "engineering-console_${VER}_all.deb" "engineering-console-$VER-macos-arm64.dmg"; do
-            [ -f "assets/$f" ] || { echo "::error::missing $f"; fail=1; }
-          done
-          [ -f "assets/engineering-console-$VER-macos-x86_64.dmg" ] || echo "::warning::Intel Mac DMG was not built - the release will have no Intel download"
-          exit $fail
-      - name: Upload to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          gh release upload "$TAG" assets/* --clobber --repo "${{ github.repository }}"
-          if [ -z "$(gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body)" ]; then
-            gh release edit "$TAG" --notes-file packaging/RELEASE_NOTES.md --repo "${{ github.repository }}"
-          fi
+cat > "$APPDIR/AppRun" <<'RUN'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+APP="$HERE/usr/lib/engineering-console"
+export LD_LIBRARY_PATH="$APP/_internal:$APP${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$APP/engineering-console" "$@"
+RUN
+chmod 755 "$APPDIR/AppRun"
+
+TOOL="$B/appimagetool-x86_64.AppImage"
+curl -fsSL -o "$TOOL" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+chmod +x "$TOOL"
+# --appimage-extract-and-run: works on build machines (CI containers) that have no FUSE
+ARCH=x86_64 "$TOOL" --appimage-extract-and-run --no-appstream "$APPDIR" "$OUT"
+chmod +x "$OUT"
+echo "Built $OUT ($(du -h "$OUT" | cut -f1))"
