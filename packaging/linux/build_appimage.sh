@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build engineering-console-<version>-linux-x86_64.AppImage  (one file, runs on most x86_64 Linux distributions).
-# Needs: Linux x86_64, Python 3.9+ with venv, internet access (PySide6, PyInstaller, appimagetool), libxcb-cursor0.
+# Needs: Linux x86_64, Python 3.9+ with venv, internet access (PySide6, PyInstaller, appimagetool), and the xcb libraries below.
 # For the widest compatibility build on an OLD distribution (the release workflow uses Ubuntu 22.04): an AppImage runs
 # on systems with the same or a newer glibc than the one it was built on.
 #   ./packaging/linux/build_appimage.sh        ->  dist/engineering-console-<version>-linux-x86_64.AppImage
@@ -24,14 +24,16 @@ APPDIR="$B/EngineeringConsole.AppDir"
 mkdir -p "$APPDIR/usr/lib" "$APPDIR/usr/share/doc/engineering-console/licenses"
 cp -r "$B/pyi/engineering-console" "$APPDIR/usr/lib/engineering-console"
 
-# Qt 6.5+ needs libxcb-cursor to open a window under X11; many distributions do not install it, so ship it.
-CUR=$(ldconfig -p | awk '/libxcb-cursor\.so\.0 /{print $NF; exit}')
-if [ -n "$CUR" ]; then
+# Qt's X11 plugin needs these small xcb libraries; many distributions do not install them all, so ship them.
+for lib in libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 libxcb-render-util.so.0 libxcb-xkb.so.1 libxcb-xinerama.so.0 libxkbcommon-x11.so.0; do
+  SRC=$(ldconfig -p | awk -v l="$lib" '$1==l {print $NF; exit}')
+  if [ -z "$SRC" ]; then
+    echo "!! $lib not found on the build machine. Refusing to build an AppImage that may not open a window." >&2; exit 1
+  fi
   for d in "$APPDIR/usr/lib/engineering-console" "$APPDIR/usr/lib/engineering-console/_internal"; do
-    [ -d "$d" ] && cp -L "$CUR" "$d/" || true
+    [ -d "$d" ] && cp -L "$SRC" "$d/" || true
   done
-else
-  echo "!! libxcb-cursor.so.0 not found on the build machine (apt install libxcb-cursor0). Refusing to build an AppImage that may not open a window." >&2; exit 1; fi
+done
 
 cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$APPDIR/usr/share/doc/engineering-console/"
 cp licenses/third-party/* "$APPDIR/usr/share/doc/engineering-console/licenses/"
