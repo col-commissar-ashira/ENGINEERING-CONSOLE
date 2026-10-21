@@ -46,7 +46,12 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xkb1 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0
+          libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0
+          libxcb-xinput0 libxcb-xkb1 libxcb-util1 libxcb-glx0 libxkbcommon-x11-0
+          libegl1 libgl1 libfuse2 xvfb
       - name: Build .deb
         run: bash packaging/build_deb.sh
       - name: Build AppImage
@@ -55,10 +60,13 @@ jobs:
         run: |
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb | grep -E "usr/bin/engineering-console|\.desktop|\.svg|LICENSE"
-      - name: Smoke-test AppImage (system libxcb-cursor removed first, to prove the bundled copy works)
+      - name: Smoke-test AppImage (system xcb libraries removed first, to prove the bundled copies work)
         run: |
           A=$(ls dist/*.AppImage)
-          sudo apt-get remove -y libxcb-cursor0
+          # --force-depends: remove only these libraries and leave their dependents (Mesa, Xvfb) installed
+          sudo dpkg --purge --force-depends libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xinput0 libxcb-xkb1 libxcb-util1 libxkbcommon-x11-0
           "$A" --appimage-extract-and-run --version
           "$A" --appimage-extract-and-run --sensors | head -20
           set +e
