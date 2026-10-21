@@ -134,7 +134,7 @@ check("maintainer is Ashira Resevic <ashiraresevic@proton.me> in the .deb, AppSt
       and f"<update_contact>{EMAIL}</update_contact>" in ALL["packaging/org.engineeringconsole.EngineeringConsole.metainfo.xml"])
 check("no placeholder maintainer/e-mail left (noreply@invalid, you@example.com)", not [r for r, t in ALL.items() if re.search(r"noreply@invalid|you@example\.com", t) and r != "tests/test_repo_audit.py"])
 check("the only person named anywhere in the project is Ashira Resevic", not [r for r, t in ALL.items() if re.search(r"norman|morris", t, re.I) and r != "tests/test_repo_audit.py"])
-check("name and version unchanged (Engineering Console 3.0.0)", "Engineering Console" in ALL["README.md"] and '__version__ = "3.0.0"' in ALL["engineering_console/__init__.py"])
+check("name and version unchanged (Engineering Console 3.0.1)", "Engineering Console" in ALL["README.md"] and '__version__ = "3.0.1"' in ALL["engineering_console/__init__.py"])
 check("AppStream metadata says MIT", "<project_license>MIT</project_license>" in ALL["packaging/org.engineeringconsole.EngineeringConsole.metainfo.xml"])
 check("Debian copyright file names the holder and MIT", "Copyright: 2026 Ashira Resevic" in ALL["packaging/build_deb.sh"] and "License: MIT" in ALL["packaging/build_deb.sh"])
 check("no other project license is claimed (no Apache/GPL headers in project files)",
