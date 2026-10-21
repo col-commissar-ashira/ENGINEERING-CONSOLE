@@ -62,11 +62,28 @@ jobs:
           "$A" --appimage-extract-and-run --version
           "$A" --appimage-extract-and-run --sensors | head -20
           set +e
-          xvfb-run -a timeout 10 "$A" --appimage-extract-and-run
+          QT_DEBUG_PLUGINS=1 xvfb-run -a timeout 10 "$A" --appimage-extract-and-run > qt.log 2>&1
           rc=$?
+          echo "--- Qt plugin messages:"
+          grep -iE "cannot load|not found|cannot open|libxcb|libxkb" qt.log | head -30
           echo "exit code $rc (124 = still running after 10 s = started fine)"
           [ "$rc" = 124 ]
+      - name: Diagnose missing libraries
+        if: failure()
+        run: |
+          A=$(ls dist/*.AppImage)
+          rm -rf diag && mkdir diag && cd diag
+          "../$A" --appimage-extract >/dev/null
+          echo "--- libxcb-cursor copies in the bundle:"
+          find squashfs-root -name 'libxcb-cursor*'
+          Q=$(find squashfs-root -name libqxcb.so | head -1)
+          echo "--- plugin: $Q"
+          I=$(find squashfs-root -maxdepth 4 -type d -name _internal | head -1)
+          echo "--- bundle lib folder: $I"
+          echo "--- libraries the plugin cannot find (with the bundle's folder on the path):"
+          LD_LIBRARY_PATH="$PWD/$I" ldd "$Q" | grep -i "not found" || echo "none"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: linux
           path: |
