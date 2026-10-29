@@ -1,4 +1,10 @@
 name: Build release downloads
+# HOW TO USE: on GitHub, Releases > "Draft a new release" > create the tag (for example v3.0.1, it must equal "v" + the
+# version in engineering_console/__init__.py) > "Publish release". This workflow then builds the Linux AppImage, the .deb,
+# the macOS DMGs and the Windows installer + portable zip and attaches them, plus SHA256SUMS.txt, to that release.
+# It takes roughly 15-25 minutes.
+# Manual run (Actions tab > Run workflow): builds everything as a test and keeps the files as downloadable workflow
+# artifacts. It does not touch any release.
 on:
   release:
     types: [published]
@@ -31,27 +37,20 @@ jobs:
             python3 packaging/check_version.py
           fi
       - run: pip install -r requirements.txt
-      - name: Restore executable bits (web uploads lose them)
-        run: chmod +x install.sh uninstall.sh run.sh run_macos.command packaging/build_deb.sh
       - name: Run all tests
         run: for t in tests/test_*.py; do echo "== $t"; python3 "$t" || exit 1; done
 
   linux:
     name: Linux (.deb + AppImage)
     needs: tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04          # oldest glibc we build on = widest compatibility for the AppImage
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
       - name: System packages
-        run: >
-          sudo apt-get update && sudo apt-get install -y
-          libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0
-          libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0
-          libxcb-xinput0 libxcb-xkb1 libxcb-util1 libxcb-glx0 libxkbcommon-x11-0
-          libegl1 libgl1 libfuse2 xvfb
+        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
       - name: Build .deb
         run: bash packaging/build_deb.sh
       - name: Build AppImage
@@ -60,38 +59,18 @@ jobs:
         run: |
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb | grep -E "usr/bin/engineering-console|\.desktop|\.svg|LICENSE"
-      - name: Smoke-test AppImage (system xcb libraries removed first, to prove the bundled copies work)
+      - name: Smoke-test AppImage (system libxcb-cursor removed first, to prove the bundled copy works)
         run: |
           A=$(ls dist/*.AppImage)
-          # --force-depends: remove only these libraries and leave their dependents (Mesa, Xvfb) installed
-          sudo dpkg --purge --force-depends libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
-            libxcb-xinput0 libxcb-xkb1 libxcb-util1 libxkbcommon-x11-0
+          sudo apt-get remove -y libxcb-cursor0
           "$A" --appimage-extract-and-run --version
           "$A" --appimage-extract-and-run --sensors | head -20
           set +e
-          QT_DEBUG_PLUGINS=1 xvfb-run -a timeout 10 "$A" --appimage-extract-and-run > qt.log 2>&1
+          xvfb-run -a timeout 10 "$A" --appimage-extract-and-run
           rc=$?
-          echo "--- Qt plugin messages:"
-          grep -iE "cannot load|not found|cannot open|libxcb|libxkb" qt.log | head -30
           echo "exit code $rc (124 = still running after 10 s = started fine)"
           [ "$rc" = 124 ]
-      - name: Diagnose missing libraries
-        if: failure()
-        run: |
-          A=$(ls dist/*.AppImage)
-          rm -rf diag && mkdir diag && cd diag
-          "../$A" --appimage-extract >/dev/null
-          echo "--- libxcb copies in the bundle:"
-          find squashfs-root -name 'libxcb*'
-          Q=$(find squashfs-root -name libqxcb.so | head -1)
-          echo "--- plugin: $Q"
-          I=$(find squashfs-root -maxdepth 4 -type d -name _internal | head -1)
-          echo "--- bundle lib folder: $I"
-          echo "--- libraries the plugin cannot find (with the bundle's folder on the path):"
-          LD_LIBRARY_PATH="$PWD/$I" ldd "$Q" | grep -i "not found" || echo "none"
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: linux
           path: |
@@ -104,13 +83,13 @@ jobs:
     needs: tests
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
-    continue-on-error: ${{ matrix.optional }}
+    continue-on-error: ${{ matrix.optional }}     # a problem with the Intel runner must not block the other downloads
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14,         arch: arm64,  optional: false }
-          - { runner: macos-15-intel,   arch: x86_64, optional: true  }
+          - { runner: macos-14,         arch: arm64,  optional: false }   # Apple silicon
+          - { runner: macos-15-intel,   arch: x86_64, optional: true  }   # Intel Macs (label unverified, see README)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -135,14 +114,73 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
+  windows:
+    name: Windows (installer + portable zip)
+    needs: tests
+    runs-on: windows-2022
+    timeout-minutes: 40
+    # First Windows build ever: a failure here must not block the Linux and macOS downloads. Once a release has gone
+    # through cleanly, delete the next line and add the two Windows files to the "important downloads" check below.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Build bundle, portable zip and installer
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File packaging\windows\build_windows.ps1
+      - name: Check that both Windows files exist
+        shell: powershell
+        run: |
+          $ver = python packaging/check_version.py
+          foreach ($f in "dist\engineering-console-$ver-windows-x64-setup.exe", "dist\engineering-console-$ver-windows-x64.zip") {
+            if (-not (Test-Path $f)) { throw "missing $f" }
+            Get-Item $f | Select-Object Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}} | Format-Table
+          }
+      - name: Smoke-test the portable bundle (no Python installed on its path, headless Qt)
+        shell: powershell
+        run: |
+          $exe = "dist\Engineering Console\Engineering Console.exe"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { throw "Engineering Console exited early with code $($p.ExitCode)" }
+          Write-Host "still running after 12 s: started fine"
+          Stop-Process -Id $p.Id -Force
+      - name: Install silently, start the installed app, uninstall
+        shell: powershell
+        run: |
+          $ver = python packaging/check_version.py
+          $dir = Join-Path $env:RUNNER_TEMP "ec-installed"
+          $setup = "dist\engineering-console-$ver-windows-x64-setup.exe"
+          $r = Start-Process $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$dir" -Wait -PassThru
+          if ($r.ExitCode -ne 0) { throw "installer exit code $($r.ExitCode)" }
+          if (-not (Test-Path "$dir\Engineering Console.exe")) { throw "app not installed" }
+          if (-not (Test-Path "$dir\licenses")) { throw "license folder missing" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process "$dir\Engineering Console.exe" -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { throw "installed app exited early with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Start-Sleep -Seconds 2
+          $u = Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*-setup.exe
+            dist/*.zip
+          if-no-files-found: error
+
   attach:
     name: Attach downloads to the release
     if: github.event_name == 'release' && needs.linux.result == 'success'
-    needs: [linux, macos]
+    needs: [linux, macos, windows]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write                 # only this job may modify the release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -159,6 +197,8 @@ jobs:
             [ -f "assets/$f" ] || { echo "::error::missing $f"; fail=1; }
           done
           [ -f "assets/engineering-console-$VER-macos-x86_64.dmg" ] || echo "::warning::Intel Mac DMG was not built - the release will have no Intel download"
+          [ -f "assets/engineering-console-$VER-windows-x64-setup.exe" ] || echo "::warning::Windows installer was not built - the release will have no Windows download (see the Windows job log)"
+          [ -f "assets/engineering-console-$VER-windows-x64.zip" ] || echo "::warning::Windows portable zip was not built"
           exit $fail
       - name: Upload to the release
         env:
@@ -166,6 +206,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "$TAG" assets/* --clobber --repo "${{ github.repository }}"
+          # Fill in the "which file do I download" text only if the release has no description yet
           if [ -z "$(gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body)" ]; then
             gh release edit "$TAG" --notes-file packaging/RELEASE_NOTES.md --repo "${{ github.repository }}"
           fi
