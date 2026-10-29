@@ -48,18 +48,29 @@ Compress-Archive -Path $out -DestinationPath $zip -CompressionLevel Optimal
 Write-Host "Built: $zip"
 
 # Installer (Inno Setup 6; installed on demand through Chocolatey if missing, e.g. on a fresh CI machine)
-$iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
-if (-not $iscc) {
-    foreach ($c in "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-                   "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") { if (Test-Path $c) { $iscc = $c; break } }
+function Find-Iscc {
+    $cmd = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+    if ($cmd) { return $cmd }
+    $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:LOCALAPPDATA\Programs") | Where-Object { $_ -and (Test-Path $_) }
+    foreach ($r in $roots) {
+        $f = Get-ChildItem $r -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($f) { return $f.FullName }
+    }
+    return $null
 }
+$iscc = Find-Iscc
 if (-not $iscc -and (Get-Command choco -ErrorAction SilentlyContinue)) {
     choco install innosetup --no-progress -y | Out-Host
-    $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+    $iscc = Find-Iscc
 }
-if (-not $iscc -or -not (Test-Path $iscc)) {
+if (-not $iscc) {
+    # On a developer PC the zip alone is still useful; on the build server a missing installer must be an error.
+    if ($env:GITHUB_ACTIONS) { throw "Inno Setup (ISCC.exe) not found - the installer could not be built" }
     Write-Warning "Inno Setup 6 not found (https://jrsoftware.org/isdl.php) - only the portable zip was built."
     exit 0
 }
+Write-Host "Using $iscc"
 Run $iscc @("/Qp", "/DAppVersion=$ver", "packaging\windows\installer.iss")
-Write-Host "Built: dist\engineering-console-$ver-windows-x64-setup.exe"
+$setup = "dist\engineering-console-$ver-windows-x64-setup.exe"
+if (-not (Test-Path $setup)) { throw "Inno Setup finished but $setup does not exist" }
+Write-Host "Built: $setup"
