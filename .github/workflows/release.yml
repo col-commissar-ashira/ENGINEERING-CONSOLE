@@ -56,6 +56,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libxcb-xinput0 libxcb-sync1 libxcb-render0 libxcb-shm0 libxcb-glx0 libxcb-util1 libx11-xcb1 \
+            libxkbcommon0 libdbus-1-3 libfontconfig1 libfreetype6 \
             libpulse0 libegl1 libgl1 libfuse2 xvfb
       - name: Build .deb
         run: bash packaging/build_deb.sh
@@ -146,6 +148,8 @@ jobs:
         shell: powershell
         run: |
           $ver = python packaging/check_version.py
+          Write-Host "Files in dist:"
+          Get-ChildItem dist -File -ErrorAction SilentlyContinue | Format-Table Name, Length
           foreach ($f in "dist\engineering-console-$ver-windows-x64-setup.exe", "dist\engineering-console-$ver-windows-x64.zip") {
             if (-not (Test-Path $f)) { throw "missing $f" }
             Get-Item $f | Select-Object Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}} | Format-Table
