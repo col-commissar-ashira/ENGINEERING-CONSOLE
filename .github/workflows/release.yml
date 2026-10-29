@@ -52,7 +52,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libgl1 libfuse2 xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libpulse0 libegl1 libgl1 libfuse2 xvfb
       - name: Build .deb
         run: bash packaging/build_deb.sh
       - name: Build AppImage
@@ -128,6 +132,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Install Inno Setup (installer builder)
+        shell: powershell
+        run: |
+          choco install innosetup --no-progress -y
+          $c = Get-ChildItem "C:\Program Files (x86)", "C:\Program Files" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $c) { throw "Inno Setup did not install (ISCC.exe not found)" }
+          Write-Host "Inno Setup compiler: $($c.FullName)"
       - name: Build bundle, portable zip and installer
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File packaging\windows\build_windows.ps1
