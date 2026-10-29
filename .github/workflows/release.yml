@@ -37,6 +37,8 @@ jobs:
             python3 packaging/check_version.py
           fi
       - run: pip install -r requirements.txt
+      - name: Restore executable bits (uploading through the GitHub website drops them)
+        run: chmod +x install.sh uninstall.sh run.sh run_macos.command packaging/build_deb.sh
       - name: Run all tests
         run: for t in tests/test_*.py; do echo "== $t"; python3 "$t" || exit 1; done
 
